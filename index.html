@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wardogs Config Editor</title>
+<meta name="description" content="Edit Wardogs GameUserSettings.ini and Engine.ini in the browser, with stackable profiles and snapshots.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23161a17'/%3E%3Cpath d='M3 4h10M3 8h10M3 12h10' stroke='%23d1a84b' stroke-width='1.5'/%3E%3Ccircle cx='6' cy='4' r='1.6' fill='%23d1a84b'/%3E%3Ccircle cx='10' cy='8' r='1.6' fill='%23d1a84b'/%3E%3Ccircle cx='5' cy='12' r='1.6' fill='%23d1a84b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">Wardogs <b>Config</b></div>
+    <div class="conn" id="conn"></div>
+    <div class="spacer"></div>
+    <span id="pills" style="display:contents"></span>
+    <button class="btn" id="discardBtn">Discard</button>
+    <button class="btn" id="layerBtn" title="Turn your unsaved edits into an override layer">Save as layer</button>
+    <button class="btn primary" id="saveBtn" title="Ctrl+S">Save</button>
+  </div>
+  <div id="banner"></div>
+  <nav class="tabs" id="tabs"></nav>
+</header>
+<main id="view"></main>
+<div id="modal" hidden></div>
+<div id="toasts"></div>
+<noscript><p style="padding:20px">This editor needs JavaScript.</p></noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
