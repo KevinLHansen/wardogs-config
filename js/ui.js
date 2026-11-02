@@ -1,5 +1,5 @@
 import { humanize, fmtNum, structGet, structSet, splitTop, unwrap } from './ini.js';
-import { docOf, layerFor } from './state.js';
+import { docOf } from './state.js';
 
 export function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -90,10 +90,6 @@ function accessor(def) {
 export function labelBlock(label, help, code, extra) {
   return h('div', { class: 'lbl' }, h('label', {}, label, extra), help && h('small', {}, help), code && h('code', {}, code));
 }
-export function layerBadge(file, section, key) {
-  const name = layerFor(file, section, key);
-  return name ? h('span', { class: 'badges' }, h('span', { class: 'badge layer', title: 'An active layer forces this setting' }, '◆ ' + name)) : null;
-}
 
 export function field(def) {
   const acc = accessor(def);
@@ -145,7 +141,7 @@ export function field(def) {
       break;
     }
   }
-  row.append(labelBlock(def.label || humanize(def.f || def.k), def.help, def.f ? `${def.k} › ${def.f}` : def.k, layerBadge(def.file, def.s, def.k)), ctl);
+  row.append(labelBlock(def.label || humanize(def.f || def.k), def.help, def.f ? `${def.k} › ${def.f}` : def.k), ctl);
   mark();
   return row;
 }

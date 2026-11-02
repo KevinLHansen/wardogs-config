@@ -1,6 +1,6 @@
 import { humanize, splitTop, unwrap, tagList, tagListStr } from './ini.js';
 import { S, SEC, docOf } from './state.js';
-import { h, toast, card, labelBlock, layerBadge, B, N, R, T, SEL, auto } from './ui.js';
+import { h, toast, card, labelBlock, B, N, R, T, SEL, auto } from './ui.js';
 
 const { U, SG, JOY, BINDS } = SEC;
 const gus = () => docOf('gus');
@@ -25,7 +25,7 @@ function resolutionRow() {
   };
   nx.onchange = ny.onchange = apply;
   sel.onchange = () => { if (!sel.value) return; [nx.value, ny.value] = sel.value.split('x'); sel.value = ''; apply(); };
-  row.append(labelBlock('Resolution', 'Also updates the "last confirmed" resolution so the game keeps it', 'ResolutionSizeX / ResolutionSizeY', layerBadge('gus', U, 'ResolutionSizeX')),
+  row.append(labelBlock('Resolution', 'Also updates the "last confirmed" resolution so the game keeps it', 'ResolutionSizeX / ResolutionSizeY'),
     h('div', { class: 'ctl' }, nx, h('span', { class: 'unit' }, '×'), ny, sel));
   mark();
   return row;
@@ -332,7 +332,7 @@ export function tabKeybinds() {
   return h('div', { class: 'grid' },
     unboundCard(),
     card('Custom keybindings', [
-      h('div', { class: 'row' }, labelBlock('Add an override', 'Action tags come from the game (Input.NamedActions.…). Rebind once in-game to discover a tag.', null, layerBadge('gus', BINDS, 'CustomKeybindings')),
+      h('div', { class: 'row' }, labelBlock('Add an override', 'Action tags come from the game (Input.NamedActions.…). Rebind once in-game to discover a tag.'),
         h('div', { class: 'ctl' }, tagInput, h('datalist', { id: 'known-tags' }, known.map(t => h('option', { value: t }))), h('button', { class: 'btn', onclick: () => { const t = tagInput.value.trim(); if (t) addOverride(t); } }, 'Add'))),
     ], { wide: true, note: [
       h('p', {}, 'The game only writes actions you have changed. This page remembers every action it has seen in a loaded file (in this browser), so those stay listed after the game drops them. Default keys are learned when the file shows one.'),
