@@ -1,0 +1,9 @@
+{
+  "name": "wardogs-config",
+  "private": true,
+  "type": "module",
+  "description": "Editor for Wardogs GameUserSettings.ini (website + Windows desktop app).",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

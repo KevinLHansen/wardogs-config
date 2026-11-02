@@ -2,11 +2,15 @@ import { diffTexts } from './ini.js';
 import { db, fileKey, readFile, encode } from './store.js';
 import { S, SEC, docOf, anyDirty } from './state.js';
 import { h, modal, closeModal, toast, confirmModal, changeRow, card, labelBlock, download } from './ui.js';
-import { tabGraphics, tabControls, tabKeybinds, stopCapture, isCapturing, parseBinds } from './editors.js';
+import { tabGraphics, tabControls, tabKeybinds, stopCapture, isCapturing } from './editors.js';
+import { parseBinds, learnBinds as learnFrom } from './binds.js';
+import { isDesktop, initDesktop, defaultPath, stamp, readPath, writePath, choosePath, exitApp, loadData, saveData, dataLocation } from './desktop.js';
 
-// Chrome won't give pages access to folders under AppData, so files are loaded with a picker
-// and saved as downloads the user copies back.
+// Two modes, one page. Hosted: Chrome won't give pages access to folders under AppData, so the file is
+// loaded with a picker and saved as a download the user copies back. Desktop app: read and written in place.
 const CONFIG_PATH = '%LOCALAPPDATA%\\Wardogs\\Saved\\Config\\WindowsClient';
+const RELEASES = 'https://github.com/KevinLHansen/wardogs-config/releases/latest';
+const SAVE = isDesktop ? 'Save' : 'Download';
 const LABEL = { gus: 'GameUserSettings.ini' };
 const MAX_AUTO = 20;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -14,23 +18,39 @@ const fmtDate = t => new Date(t).toLocaleString(undefined, { dateStyle: 'medium'
 const ui = { rawFile: 'gus', rawMode: 'keys', search: '', rawPending: null };
 
 /* ================= persistence ================= */
-const saveKnown = () => db.put('kv', S.known, 'knownBinds').catch(e => toast('Could not save keybind list: ' + e.message, 'err'));
+// Snapshots and remembered keybind actions. Website: IndexedDB. Desktop app: one JSON file (see desktop.js).
+// If the desktop data file exists but couldn't be read, nothing is written, so it isn't overwritten with an empty list.
+let dataBroken = false;
+function saveDesktopData() {
+  if (dataBroken) return Promise.reject(new Error('the data file could not be read when the app started, so it is left untouched'));
+  return saveData({ app: 'wardogs-config-editor', version: 1, snapshots: S.snapshots, knownBinds: S.known });
+}
+const persist = {
+  putSnapshot: s => isDesktop ? saveDesktopData() : db.put('snapshots', s),
+  deleteSnapshots: ids => isDesktop ? saveDesktopData() : Promise.all(ids.map(id => db.del('snapshots', id))),
+  known: () => isDesktop ? saveDesktopData() : db.put('kv', S.known, 'knownBinds'),
+};
+async function loadPersisted() {
+  if (!isDesktop) {
+    S.snapshots = await db.all('snapshots');
+    S.known = (await db.get('kv', 'knownBinds')) || {};
+    return;
+  }
+  try {
+    const data = await loadData();
+    S.snapshots = data.snapshots || [];
+    S.known = data.knownBinds || {};
+  } catch (e) {
+    dataBroken = true;
+    toast(`Could not read ${dataLocation() || 'the data file'} (${e.message}). Snapshots won't be saved until it's fixed or removed.`, 'err');
+  }
+}
+const saveKnown = () => persist.known().catch(e => toast('Could not save keybind list: ' + e.message, 'err'));
 S.hooks.saveKnown = saveKnown;
 
-// Remember every keybind action the game wrote to the loaded file, and any default key it reveals
-// (a key saved without bIsCustom). Returns how many actions were new.
+// Remember every keybind action the game wrote to the loaded file. Returns how many actions were new.
 function learnBinds() {
-  const now = Date.now();
-  let added = 0;
-  for (const b of parseBinds(docOf('gus').origGet(SEC.BINDS, 'CustomKeybindings'))) {
-    if (!b.tag) continue;
-    const k = S.known[b.tag] ||= (added++, { firstSeen: now, defaults: {} });
-    k.lastSeen = now;
-    for (const slot of ['PrimaryKey', 'SecondaryKey']) {
-      const s = b.slots[slot];
-      if (s?.Key && s.bIsCustom !== 'True') k.defaults[slot] = s.Key;
-    }
-  }
+  const added = learnFrom(S.known, parseBinds(docOf('gus').origGet(SEC.BINDS, 'CustomKeybindings')));
   saveKnown();
   return added;
 }
@@ -64,9 +84,60 @@ async function loadFiles(fileList) {
 }
 
 function pickFiles() {
+  if (isDesktop) return chooseDesktopFile();
   const inp = h('input', { type: 'file', accept: '.ini' });
   inp.onchange = () => loadFiles([...inp.files]);
   inp.click();
+}
+
+/* ================= desktop: direct file access ================= */
+// Read the file at S.path into the editor. Throws if it can't be read.
+async function loadFromDisk() {
+  const r = await readPath(S.path);
+  const f = S.files.gus;
+  Object.assign(f, { exists: true, enc: r.enc, lastModified: r.lastModified });
+  f.doc.load(r.text);
+  S.loaded = true;
+  S.stale = false;
+  ui.rawPending = null;
+  return learnBinds();
+}
+
+async function reloadFromDisk(message) {
+  try { const added = await loadFromDisk(); render(); toast(message + (added ? ` Remembered ${added} new keybind action${added === 1 ? '' : 's'}.` : '')); }
+  catch (e) { toast('Could not read the file: ' + e.message, 'err'); }
+}
+
+function reloadClicked() {
+  if (anyDirty() || ui.rawPending) confirmModal('Discard unsaved edits?', 'Reloading reads the file again and throws away edits you haven\'t saved.', 'Reload and discard', () => reloadFromDisk('Reloaded.'), true);
+  else reloadFromDisk('Reloaded.');
+}
+
+async function chooseDesktopFile() {
+  const p = await choosePath(S.path).catch(() => null);
+  if (!p) return;
+  const go = () => { S.path = p; reloadFromDisk('Loaded ' + p); };
+  if (anyDirty() || ui.rawPending) confirmModal('Discard unsaved edits?', 'Opening another file throws away edits you haven\'t saved.', 'Open and discard', go, true);
+  else go();
+}
+
+// The file as it is on disk now, for snapshots (null if it doesn't exist).
+async function diskTexts() {
+  return { gus: (await stamp(S.path)) == null ? null : (await readPath(S.path)).text };
+}
+
+// Watch for the game rewriting the file: reload when there are no edits, otherwise flag it.
+async function poll() {
+  if (!S.loaded || S.busy) return;
+  const t = await stamp(S.path);
+  if (t === S.files.gus.lastModified || S.busy) return;
+  if (!anyDirty() && !ui.rawPending) await reloadFromDisk('Reloaded: the file changed on disk.');
+  else if (!S.stale) { S.stale = true; renderHeader(); }
+}
+
+function windowClosing() {
+  if (anyDirty() || ui.rawPending) confirmModal('Quit without saving?', 'You have edits that aren\'t saved to the file.', 'Quit', exitApp, true);
+  else exitApp();
 }
 
 /* ================= snapshots ================= */
@@ -76,13 +147,18 @@ function loadedTexts() {
   for (const [key, f] of Object.entries(S.files)) out[key] = f.exists ? f.doc.original : null;
   return out;
 }
+// Desktop snapshots hold the file as it is on disk; hosted ones the file as loaded.
 async function addSnapshot(name, auto) {
-  const snap = { id: uid(), name, auto, created: Date.now(), files: loadedTexts() };
-  await db.put('snapshots', snap);
+  const snap = { id: uid(), name, auto, created: Date.now(), files: isDesktop ? await diskTexts() : loadedTexts() };
   S.snapshots.push(snap);
+  try { await persist.putSnapshot(snap); }
+  catch (e) { S.snapshots = S.snapshots.filter(s => s !== snap); throw e; }
   if (auto) {
-    const autos = S.snapshots.filter(s => s.auto).sort((a, b) => b.created - a.created);
-    for (const old of autos.slice(MAX_AUTO)) { await db.del('snapshots', old.id); S.snapshots = S.snapshots.filter(s => s !== old); }
+    const old = S.snapshots.filter(s => s.auto).sort((a, b) => b.created - a.created).slice(MAX_AUTO);
+    if (old.length) {
+      S.snapshots = S.snapshots.filter(s => !old.includes(s));
+      await persist.deleteSnapshots(old.map(s => s.id)).catch(e => toast('Could not prune old snapshots: ' + e.message, 'err'));
+    }
   }
   return snap;
 }
@@ -114,14 +190,47 @@ function copyBackModal(names) {
     [h('button', { class: 'btn primary', onclick: closeModal }, 'Done')]);
 }
 
-// Downloads every changed file, after an automatic snapshot of the version it replaces.
-async function save(reason = 'Before download') {
+// Saves every changed file (download, or write in the desktop app), after an automatic snapshot of the version it replaces.
+async function save(reason = 'Before ' + SAVE.toLowerCase(), force = false) {
   applyRawText();
   const dirty = Object.entries(S.files).filter(([, f]) => f.doc.dirty());
   if (!dirty.length) return;
+  if (isDesktop) return saveToDisk(reason, force);
   try { await addSnapshot(reason, true); }
   catch (e) { toast('Could not store a snapshot, so nothing was downloaded: ' + e.message, 'err'); return; }
   downloadFiles(Object.fromEntries(dirty.map(([key, f]) => [key, f.doc.serialize()])));
+}
+
+async function saveToDisk(reason, force) {
+  const f = S.files.gus;
+  S.busy = true;
+  try {
+    if (!force && (await stamp(S.path)) !== f.lastModified) return conflictModal(reason);
+    try { await addSnapshot(reason, true); }
+    catch (e) { toast('Could not store a snapshot, so nothing was saved: ' + e.message, 'err'); return; }
+    const text = f.doc.serialize();
+    f.lastModified = await writePath(S.path, text, f.enc);
+    f.doc.load(text);
+    S.stale = false;
+    closeModal(); render();
+    toast('Saved. A snapshot of the previous version was kept.');
+  } catch (e) {
+    toast('Saving failed: ' + e.message + '. Is the file read-only or open in another program?', 'err');
+  } finally { S.busy = false; }
+}
+
+// The file changed on disk since it was loaded (usually the game): show what changed and ask.
+async function conflictModal(reason) {
+  const f = S.files.gus;
+  let rows = [];
+  try { rows = diffTexts(f.doc.original, (await readPath(S.path)).text).map(c => changeRow(LABEL.gus, c)); }
+  catch { /* deleted or unreadable: no diff to show */ }
+  modal('The file changed on disk', h('div', {},
+    h('p', { style: 'margin-top:0' }, 'Something (usually the game) wrote GameUserSettings.ini after you loaded it. Changes on disk since then:'),
+    rows.length ? rows : h('p', { class: 'muted' }, 'No setting differences (only the timestamp changed, or the file is gone).'),
+    h('p', { class: 'muted' }, 'Overwriting replaces the version on disk with yours; a snapshot of the disk version is kept first.')),
+    [h('button', { class: 'btn', onclick: () => { closeModal(); reloadFromDisk('Reloaded. Your edits were discarded.'); } }, 'Discard mine and reload'),
+     h('button', { class: 'btn primary', onclick: () => save(reason, true) }, 'Overwrite with mine')]);
 }
 
 function allChanges() {
@@ -132,13 +241,14 @@ function reviewSave(reason) {
   applyRawText();
   if (!anyDirty()) return;
   const list = allChanges();
-  modal(`Download ${list.length} change${list.length === 1 ? '' : 's'}?`, h('div', {},
-    list.length ? list.map(c => changeRow(LABEL[c.file], c)) : h('p', { class: 'muted' }, 'Only formatting or comment lines changed.')),
-    [h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn primary', onclick: () => save(reason) }, 'Download')]);
+  modal(`${SAVE} ${list.length} change${list.length === 1 ? '' : 's'}?`, h('div', {},
+    list.length ? list.map(c => changeRow(LABEL[c.file], c)) : h('p', { class: 'muted' }, 'Only formatting or comment lines changed.'),
+    isDesktop && h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Save with the game closed: it rewrites GameUserSettings.ini when it exits.')),
+    [h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn primary', onclick: () => save(reason) }, SAVE)]);
 }
 
 function discard() {
-  confirmModal('Discard unsaved changes?', 'All edits since the last download are thrown away.', 'Discard', () => {
+  confirmModal('Discard unsaved changes?', `All edits since the last ${SAVE.toLowerCase()} are thrown away.`, 'Discard', () => {
     for (const f of Object.values(S.files)) f.doc.load(f.doc.original);
     ui.rawPending = null;
     render();
@@ -161,13 +271,28 @@ function snapshotPreview(snap) {
   if (S.loaded) for (const [key, text] of Object.entries(texts))
     for (const c of diffTexts(S.files[key].doc.original, text)) rows.push(changeRow(LABEL[key], c));
   modal(`Restore "${snap.name}"?`, h('div', {},
-    h('p', { class: 'muted', style: 'margin-top:0' }, `Taken ${fmtDate(snap.created)}. Restoring downloads its ${Object.keys(texts).map(k => LABEL[k]).join(' and ')} for you to copy into the config folder.`),
+    h('p', { class: 'muted', style: 'margin-top:0' }, `Taken ${fmtDate(snap.created)}. ` + (isDesktop
+      ? 'Restoring writes it to GameUserSettings.ini after a snapshot of the current file.'
+      : `Restoring downloads its ${Object.keys(texts).map(k => LABEL[k]).join(' and ')} for you to copy into the config folder.`)),
     S.loaded && h('p', { class: 'muted' }, 'Changes compared with the loaded file:'),
     S.loaded && (rows.length ? rows : h('p', {}, 'Identical to the loaded file.')),
     anyDirty() && h('div', { class: 'callout warn' }, 'Your unsaved edits will be discarded.')),
-    [h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn primary', onclick: () => restoreSnapshot(snap, texts) }, 'Download')]);
+    [h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn primary', onclick: () => restoreSnapshot(snap, texts) }, isDesktop ? 'Restore' : 'Download')]);
 }
 async function restoreSnapshot(snap, texts) {
+  if (isDesktop) {
+    if (texts.gus == null) return;
+    S.busy = true;
+    try {
+      await addSnapshot(`Before restoring "${snap.name}"`, true);
+      await writePath(S.path, texts.gus, S.files.gus.enc);
+      await loadFromDisk();
+      closeModal(); render();
+      toast(`Restored "${snap.name}".`);
+    } catch (e) { toast('Restore failed: ' + e.message, 'err'); }
+    finally { S.busy = false; }
+    return;
+  }
   if (S.loaded) {
     try { await addSnapshot(`Before restoring "${snap.name}"`, true); }
     catch (e) { toast('Could not store a snapshot, so nothing was downloaded: ' + e.message, 'err'); return; }
@@ -181,7 +306,7 @@ async function restoreSnapshot(snap, texts) {
 }
 function takeSnapshotModal() {
   nameModal('Take a snapshot', `Snapshot ${new Date().toLocaleDateString()}`, async name => {
-    try { await addSnapshot(name, false); render(); toast('Snapshot saved. It holds the files as loaded, without unsaved edits.'); }
+    try { await addSnapshot(name, false); render(); toast(isDesktop ? 'Snapshot saved. It holds the file as it is on disk.' : 'Snapshot saved. It holds the files as loaded, without unsaved edits.'); }
     catch (e) { toast('Snapshot failed: ' + e.message, 'err'); }
   });
 }
@@ -198,7 +323,9 @@ function importAll() {
       const data = JSON.parse(await inp.files[0].text());
       if (data.app !== 'wardogs-config-editor') throw new Error('not an export from this editor');
       // Layers in older exports are ignored.
-      for (const s of data.snapshots || []) { await db.put('snapshots', s); S.snapshots = S.snapshots.filter(x => x.id !== s.id).concat(s); }
+      for (const s of data.snapshots || []) S.snapshots = S.snapshots.filter(x => x.id !== s.id).concat(s);
+      if (isDesktop) await saveDesktopData();
+      else for (const s of data.snapshots || []) await db.put('snapshots', s);
       // Merge remembered keybind actions; defaults seen in either copy are kept.
       const imported = data.knownBinds || {};
       for (const [tag, k] of Object.entries(imported)) {
@@ -215,6 +342,11 @@ function importAll() {
 
 /* ================= tabs ================= */
 function connectScreen() {
+  if (isDesktop) return h('div', { class: 'connect' }, h('h1', {}, 'GameUserSettings.ini not found'),
+    h('p', {}, 'Nothing was found at:'),
+    h('div', { class: 'pathbox' }, h('code', {}, S.path || CONFIG_PATH)),
+    h('p', {}, 'Start Wardogs once so it creates the file, or choose it yourself.'),
+    h('div', { class: 'pathbox' }, h('button', { class: 'btn primary', onclick: () => reloadFromDisk('Loaded.') }, 'Try again'), h('button', { class: 'btn', onclick: chooseDesktopFile }, 'Choose file…')));
   const copy = () => navigator.clipboard.writeText(CONFIG_PATH).then(() => toast('Path copied.'));
   return h('div', { class: 'connect' }, h('h1', {}, 'Load your Wardogs config'),
     h('p', {}, 'The file is read in this browser and never uploaded. Saving downloads the changed file for you to copy back into the config folder.'),
@@ -224,7 +356,8 @@ function connectScreen() {
       h('li', {}, 'Paste the path above into the dialog\'s address bar and press Enter.'),
       h('li', {}, 'Select GameUserSettings.ini.')),
     h('button', { class: 'btn primary', onclick: pickFiles }, 'Load file'),
-    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'You can also drag the file onto this page.'));
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'You can also drag the file onto this page.'),
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Want to save straight to the file? ', h('a', { href: RELEASES, target: '_blank', rel: 'noopener' }, 'Get the Windows desktop app'), '.'));
 }
 
 function tabSnapshots() {
@@ -235,10 +368,12 @@ function tabSnapshots() {
       h('div', { class: 'info' }, s.name, s.auto && h('span', { class: 'badges' }, h('span', { class: 'badge' }, 'auto')),
         h('small', {}, fmtDate(s.created))),
       h('button', { class: 'btn small', onclick: () => snapshotPreview(s) }, 'Restore…'),
-      h('button', { class: 'iconbtn', title: 'Delete', onclick: () => confirmModal('Delete snapshot?', `"${s.name}" from ${fmtDate(s.created)} is removed from this browser.`, 'Delete', async () => { await db.del('snapshots', s.id); S.snapshots = S.snapshots.filter(x => x !== s); render(); }, true) }, '🗑'))),
-      { note: `Full copies of GameUserSettings.ini as loaded. One is taken automatically before every download and restore (newest ${MAX_AUTO} automatic ones kept); manual ones are kept until you delete them. Restoring downloads the snapshot's file.`,
+      h('button', { class: 'iconbtn', title: 'Delete', onclick: () => confirmModal('Delete snapshot?', `"${s.name}" from ${fmtDate(s.created)} is removed.`, 'Delete', async () => { S.snapshots = S.snapshots.filter(x => x !== s); await persist.deleteSnapshots([s.id]).catch(e => toast('Could not delete: ' + e.message, 'err')); render(); }, true) }, '🗑'))),
+      { note: isDesktop
+          ? `Full copies of GameUserSettings.ini as it was on disk. One is taken automatically before every save and restore (newest ${MAX_AUTO} automatic ones kept); manual ones are kept until you delete them.`
+          : `Full copies of GameUserSettings.ini as loaded. One is taken automatically before every download and restore (newest ${MAX_AUTO} automatic ones kept); manual ones are kept until you delete them. Restoring downloads the snapshot's file.`,
         empty: 'No snapshots yet.', actions: S.loaded && h('button', { class: 'btn small', onclick: takeSnapshotModal }, 'Take snapshot') }),
-    card('Backup', [h('div', { class: 'row' }, labelBlock('Export / import', 'Snapshots and remembered keybind actions live in this browser only. Export them to a file to keep a backup or move to another browser.'),
+    card('Backup', [h('div', { class: 'row' }, labelBlock('Export / import', isDesktop ? `Snapshots and remembered keybind actions are kept in ${dataLocation() || 'the app data file'}. Export them to keep a backup or move them to the website.` : 'Snapshots and remembered keybind actions live in this browser only. Export them to a file to keep a backup or move to another browser.'),
       h('div', { class: 'ctl' }, h('button', { class: 'btn', onclick: exportAll }, 'Export'), h('button', { class: 'btn', onclick: importAll }, 'Import')))]),
   );
 }
@@ -293,17 +428,19 @@ function tabRaw() {
 }
 
 /* ================= shell ================= */
-const TABS = [['snapshots', 'Snapshots', tabSnapshots], ['graphics', 'Graphics', tabGraphics], ['controls', 'Controls', tabControls],
-  ['keybinds', 'Keybinds', tabKeybinds], ['raw', 'Raw', tabRaw]];
+const TABS = [['snapshots', 'Snapshots', tabSnapshots], ['controls', 'Controls', tabControls], ['keybinds', 'Keybinds', tabKeybinds],
+  ['graphics', 'Graphics', tabGraphics], ['raw', 'Raw', tabRaw]];
 
 function renderHeader() {
   const conn = document.getElementById('conn');
   conn.className = 'conn';
-  const loadBtn = h('button', { class: 'btn small', onclick: pickFiles }, S.loaded ? 'Load again' : 'Load file');
+  const loadBtn = isDesktop
+    ? h('button', { class: 'btn small', onclick: S.loaded ? reloadClicked : chooseDesktopFile }, S.loaded ? 'Reload' : 'Choose file…')
+    : h('button', { class: 'btn small', onclick: pickFiles }, S.loaded ? 'Load again' : 'Load file');
   if (S.loaded) {
     const when = S.files.gus.lastModified && `Last changed ${fmtDate(S.files.gus.lastModified)}`;
     conn.classList.add('ok');
-    conn.replaceChildren(h('span', { class: 'dot' }), h('span', { title: when || '' }, S.files.gus.name), loadBtn);
+    conn.replaceChildren(h('span', { class: 'dot' }), h('span', { title: [isDesktop && S.path, when].filter(Boolean).join('\n') }, S.files.gus.name), loadBtn);
   } else conn.replaceChildren(h('span', { class: 'dot' }), loadBtn);
 
   const dirty = anyDirty() || !!ui.rawPending;
@@ -313,6 +450,10 @@ function renderHeader() {
   ].filter(Boolean));
   document.getElementById('saveBtn').disabled = !dirty || !S.loaded;
   document.getElementById('discardBtn').disabled = !dirty;
+  const banner = document.getElementById('banner');
+  banner.replaceChildren();
+  if (S.stale) banner.append(h('div', { class: 'banner warn' }, 'GameUserSettings.ini changed on disk (probably the game) while you have unsaved edits. Saving will ask before overwriting.',
+    h('button', { class: 'btn small', onclick: () => reloadFromDisk('Reloaded. Your edits were discarded.') }, 'Discard mine and reload')));
 }
 
 function renderTabs() {
@@ -345,9 +486,12 @@ function setupDrop() {
 }
 
 async function init() {
-  setupDrop();
+  if (!isDesktop) setupDrop();
   for (const f of Object.values(S.files)) f.doc.onChange = renderHeader;
-  document.getElementById('saveBtn').onclick = () => reviewSave();
+  const saveBtn = document.getElementById('saveBtn');
+  saveBtn.textContent = SAVE;
+  saveBtn.title = `${SAVE} the changed file (Ctrl+S)`;
+  saveBtn.onclick = () => reviewSave();
   document.getElementById('discardBtn').onclick = discard;
   document.getElementById('modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal(); });
   document.addEventListener('keydown', e => {
@@ -356,12 +500,21 @@ async function init() {
   });
   window.addEventListener('beforeunload', e => { if (anyDirty() || ui.rawPending) { e.preventDefault(); e.returnValue = ''; } });
 
-  try {
-    S.snapshots = await db.all('snapshots');
-    S.known = (await db.get('kv', 'knownBinds')) || {};
-  } catch (e) { toast('Browser storage is unavailable: ' + e.message, 'err'); }
+  if (isDesktop) {
+    try { await initDesktop(windowClosing); }
+    catch (e) { toast('Desktop features failed to start: ' + e.message, 'err'); render(); return; }
+  } else db.del('kv', 'dir').catch(() => {}); // folder handle stored by the earlier folder-access version
 
-  db.del('kv', 'dir').catch(() => {}); // folder handle stored by the earlier folder-access version
+  try { await loadPersisted(); }
+  catch (e) { toast('Browser storage is unavailable: ' + e.message, 'err'); }
+
+  if (isDesktop) {
+    try {
+      S.path = await defaultPath();
+      if ((await stamp(S.path)) != null) await loadFromDisk();
+    } catch (e) { toast('Could not read the config: ' + e.message, 'err'); }
+    setInterval(() => poll().catch(() => {}), 2000);
+  }
   render();
 }
 

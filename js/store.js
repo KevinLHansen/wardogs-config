@@ -42,14 +42,17 @@ export function fileKey(name) {
   return null;
 }
 
-// Read a File (from a picker or drop), detecting the encoding so it can be written back the same way.
-export async function readFile(file) {
-  const buf = new Uint8Array(await file.arrayBuffer());
+// Decode file bytes, detecting the encoding so the file can be written back the same way.
+export function decodeBytes(buf) {
   let enc = 'utf8', off = 0;
   if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) { enc = 'utf8bom'; off = 3; }
   else if (buf[0] === 0xFF && buf[1] === 0xFE) { enc = 'utf16le'; off = 2; }
-  const text = new TextDecoder(enc === 'utf16le' ? 'utf-16le' : 'utf-8').decode(buf.subarray(off));
-  return { text, enc, lastModified: file.lastModified };
+  return { text: new TextDecoder(enc === 'utf16le' ? 'utf-16le' : 'utf-8').decode(buf.subarray(off)), enc };
+}
+
+// Read a File (from a picker or drop).
+export async function readFile(file) {
+  return { ...decodeBytes(new Uint8Array(await file.arrayBuffer())), lastModified: file.lastModified };
 }
 
 export function encode(text, enc) {

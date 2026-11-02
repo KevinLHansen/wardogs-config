@@ -17,6 +17,9 @@ export const S = {
   snapshots: [],        // { id, name, auto, created, files: { gus } }
   known: {},            // keybind actions seen in loaded files: { tag: { firstSeen, lastSeen, defaults: { PrimaryKey?, SecondaryKey? } } }
   tab: 'snapshots',
+  path: null,           // desktop app: full path of the file being edited
+  stale: false,         // desktop app: the file changed on disk while there are unsaved edits
+  busy: false,          // desktop app: a save or restore is writing the file
   hooks: {},            // render callbacks set by app.js
 };
 

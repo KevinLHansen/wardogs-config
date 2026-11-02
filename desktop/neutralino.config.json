@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "io.github.kevinlhansen.wardogsconfig",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "documentRoot": "/resources/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "tokenSecurity": "one-time",
+  "exportAuthInfo": false,
+  "logging": {
+    "enabled": false,
+    "writeToLogFile": false
+  },
+  "nativeAllowList": [
+    "app.exit",
+    "os.getEnv",
+    "os.showOpenDialog",
+    "os.open",
+    "filesystem.readBinaryFile",
+    "filesystem.writeBinaryFile",
+    "filesystem.getStats",
+    "events.*",
+    "window.setTitle",
+    "filesystem.readFile",
+    "filesystem.writeFile",
+    "filesystem.createDirectory",
+    "filesystem.move"
+  ],
+  "modes": {
+    "window": {
+      "title": "Wardogs Config",
+      "width": 1280,
+      "height": 860,
+      "minWidth": 560,
+      "minHeight": 420,
+      "center": true,
+      "enableInspector": false,
+      "exitProcessOnClose": false
+    }
+  },
+  "cli": {
+    "binaryName": "wardogs-config",
+    "resourcesPath": "/resources/",
+    "binaryVersion": "6.10.0",
+    "clientVersion": "6.10.0"
+  }
+}

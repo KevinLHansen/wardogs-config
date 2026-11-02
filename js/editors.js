@@ -1,4 +1,5 @@
-import { humanize, splitTop, unwrap, tagList, tagListStr } from './ini.js';
+import { humanize, tagList, tagListStr } from './ini.js';
+import { SLOTS, parseBinds, bindStr, bindsStr, setKey, unboundSlots, withoutSlot } from './binds.js';
 import { S, SEC, docOf } from './state.js';
 import { h, toast, card, labelBlock, B, N, R, T, SEL, auto } from './ui.js';
 
@@ -200,36 +201,9 @@ function keyName(e) {
   return OEM_CODES[c] || c;
 }
 
-export function parseBinds(value) {
-  if (!value || !value.trim()) return [];
-  return splitTop(unwrap(value)).filter(s => s.trim()).map(raw => {
-    const [tagPart, slotPart] = splitTop(unwrap(raw));
-    const tag = (/TagName="([^"]*)"/.exec(tagPart || '') || [])[1] || '';
-    const slots = {};
-    for (const s of splitTop(unwrap(slotPart || ''))) {
-      const i = s.indexOf('='); if (i < 0) continue;
-      const fields = {};
-      for (const f of splitTop(unwrap(s.slice(i + 1)))) { const j = f.indexOf('='); if (j > 0) fields[f.slice(0, j).trim()] = f.slice(j + 1); }
-      slots[s.slice(0, i).trim()] = fields;
-    }
-    return { raw, tag, slots, dirty: false };
-  });
-}
-export function bindStr(b) {
-  if (!b.dirty) return b.raw;
-  const order = ['PrimaryKey', 'SecondaryKey', ...Object.keys(b.slots).filter(n => !/^(Primary|Secondary)Key$/.test(n))];
-  const slots = order.filter(n => b.slots[n] && Object.keys(b.slots[n]).length)
-    .map(n => n + '=(' + Object.entries(b.slots[n]).map(([k, v]) => k + '=' + v).join(',') + ')');
-  return `((TagName="${b.tag}"), (${slots.join(',')}))`;
-}
 let binds = [];
-const saveBinds = () => gus().set(BINDS, 'CustomKeybindings', '(' + binds.map(bindStr).join(',') + ')');
-function setBindKey(b, slot, key) {
-  const { Key, ...rest } = b.slots[slot] || {};
-  b.slots[slot] = key ? { Key: key, ...rest, bIsCustom: 'True' } : { ...rest, bIsCustom: 'True' };
-  b.dirty = true;
-  saveBinds();
-}
+const saveBinds = () => gus().set(BINDS, 'CustomKeybindings', bindsStr(binds));
+function setBindKey(b, slot, key) { setKey(b, slot, key); saveBinds(); }
 
 let capture = null;
 export const isCapturing = () => !!capture;
@@ -270,16 +244,7 @@ function keySlot(b, slot, label) {
     k && h('button', { class: 'iconbtn', title: 'Unbind', onclick: () => { setBindKey(b, slot, ''); rerender(); } }, '✕')));
 }
 
-// A slot the game saved as custom but with no key: the game unbound it, and its menu may not let you rebind it.
-const SLOTS = [['PrimaryKey', 'Primary'], ['SecondaryKey', 'Secondary']];
-const unboundSlots = b => SLOTS.filter(([s]) => b.slots[s]?.bIsCustom === 'True' && !b.slots[s].Key);
-// Drop one slot from the override; with no custom slot left, drop the whole entry so the game uses its defaults.
-function resetSlot(b, slot) {
-  delete b.slots[slot];
-  b.dirty = true;
-  if (!Object.values(b.slots).some(s => s.bIsCustom === 'True')) binds = binds.filter(x => x !== b);
-  saveBinds();
-}
+function resetSlot(b, slot) { binds = withoutSlot(binds, b, slot); saveBinds(); }
 const defaultHint = tag => {
   const def = S.known[tag]?.defaults || {};
   const parts = SLOTS.filter(([s]) => def[s]).map(([s, l]) => `${l.toLowerCase()} ${def[s]}`);

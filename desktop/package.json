@@ -1,0 +1,11 @@
+{
+  "name": "wardogs-config-desktop",
+  "private": true,
+  "description": "Desktop build of the Wardogs config editor (Neutralino).",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "@electron/asar": "3.4.1"
+  }
+}
