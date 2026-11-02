@@ -50,6 +50,7 @@ Engine.ini and engine tweaks, layers that force a game default, exclusive layer 
 ## Hosting & distribution
 - Website: GitHub Pages from `main` in the public repo `KevinLHansen/wardogs-config`.
 - Desktop app: a GitHub Release with the zip, published only after you say so.
+  - Published by pushing a version tag (`v1.1.0`): `.github/workflows/release.yml` tests, builds with the tag as the app version (Neutralino runtime pinned by SHA-256), and creates the release. An annotated tag's message gives the title and notes; otherwise the commits since the previous tag. Hyphenated tags are prereleases.
 
 ## Testing
 - Automated: `npm test` (Node's built-in runner, no dependencies) covers the INI round-trip on an anonymised copy of your config, encodings, keybind parsing/repair/learning, and layer stacking (priority, shadowing, turning a layer off, keybind actions inside `CustomKeybindings`). Run before every commit.

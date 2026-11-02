@@ -1,0 +1,82 @@
+# Pushing a version tag (e.g. `git tag -a v1.1.0 -m "Layers"` then `git push origin v1.1.0`) builds the Windows
+# desktop app and publishes it as a GitHub Release with wardogs-config-win64.zip.
+# Release notes: an annotated tag's first line becomes the title ("v1.1.0: Layers") and the rest the notes;
+# a lightweight tag gets the commit subjects since the previous tag. Tags with a hyphen (v1.1.0-beta) are prereleases.
+name: Release desktop app
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      # Keep in step with cli.binaryVersion in desktop/neutralino.config.json.
+      NEU_VERSION: v6.10.0
+      NEU_EXE_SHA256: 1b3f87c0dd1b53015f8b33aae17ea2fa806cceba18afe2737b9f522438ed043d
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # checkout can store an annotated tag as a lightweight one; fetch it again to keep its message.
+      - run: git fetch --force --tags
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Test
+        run: npm test
+
+      - name: Get the Neutralino runtime
+        run: |
+          gh release download "$NEU_VERSION" -R neutralinojs/neutralinojs -p "neutralinojs-$NEU_VERSION.zip" -D "$RUNNER_TEMP"
+          unzip -o -j "$RUNNER_TEMP/neutralinojs-$NEU_VERSION.zip" neutralino-win_x64.exe -d desktop/bin
+          echo "$NEU_EXE_SHA256  desktop/bin/neutralino-win_x64.exe" | sha256sum -c -
+
+      - name: Build
+        working-directory: desktop
+        run: |
+          npm ci
+          # The app's version comes from the tag (v1.1.0 -> 1.1.0).
+          node -e "const fs = require('fs'), f = 'neutralino.config.json', c = JSON.parse(fs.readFileSync(f)); c.version = process.argv[1]; fs.writeFileSync(f, JSON.stringify(c, null, 2) + '\n')" "${TAG#v}"
+          npm run build
+
+      - name: Zip
+        run: |
+          cd desktop/dist
+          zip -r -X "$RUNNER_TEMP/wardogs-config-win64.zip" wardogs-config
+          echo "SHA=$(sha256sum "$RUNNER_TEMP/wardogs-config-win64.zip" | cut -d' ' -f1 | tr a-f A-F)" >> "$GITHUB_ENV"
+
+      - name: Publish
+        run: |
+          title="$TAG"
+          if [ "$(git cat-file -t "$TAG")" = tag ]; then
+            subject=$(git tag -l --format='%(contents:subject)' "$TAG")
+            [ -n "$subject" ] && title="$TAG: $subject"
+            git tag -l --format='%(contents:body)' "$TAG" > notes.md
+          else
+            prev=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+            git log --no-merges --format='- %s' "${prev:+$prev..}$TAG" > notes.md
+          fi
+          cat >> notes.md <<EOF
+
+          ## Install
+          1. Download \`wardogs-config-win64.zip\` below and unzip it anywhere.
+          2. Run \`wardogs-config/wardogs-config.exe\` (keep it next to \`resources.neu\`).
+
+          The app is unsigned, so Windows SmartScreen may warn the first time: click **More info** → **Run anyway**.
+
+          Save with the game closed: it rewrites \`GameUserSettings.ini\` when it exits.
+
+          SHA-256 of the zip: \`$SHA\`
+          EOF
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" "$RUNNER_TEMP/wardogs-config-win64.zip" --verify-tag --title "$title" --notes-file notes.md $pre

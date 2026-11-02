@@ -53,3 +53,13 @@ The desktop app uses [Neutralino](https://neutralino.js.org/) 6.10.0. To build i
 3. The app is in `desktop/dist/wardogs-config/` (`wardogs-config.exe` + `resources.neu`; keep them together). `npm run build -- <folder>` builds somewhere else, e.g. while a copy in `dist/` is running.
 
 For testing, `wardogs-config.exe --config=<copy of GameUserSettings.ini> --data=<test data.json>` works on copies instead of the real files.
+
+### Releasing
+Pushing a version tag publishes a release: the [release workflow](.github/workflows/release.yml) runs the tests, downloads the Neutralino runtime (checked against a pinned SHA-256), builds the app with the tag as its version, and creates a GitHub Release with `wardogs-config-win64.zip`.
+
+```bash
+git tag -a v1.1.0 -m "Layers per playstyle" -m "- What changed, as release notes"
+git push origin v1.1.0
+```
+
+An annotated tag's first line becomes the release title (`v1.1.0: Layers per playstyle`) and the rest its notes; a lightweight tag lists the commits since the previous tag. A tag with a hyphen (`v1.1.0-beta`) is published as a prerelease.
