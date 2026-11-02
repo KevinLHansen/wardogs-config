@@ -1,5 +1,6 @@
 import { humanize, fmtNum, structGet, structSet, splitTop, unwrap } from './ini.js';
-import { docOf } from './state.js';
+import { S, docOf } from './state.js';
+import { keyId } from './layers.js';
 
 export function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -87,15 +88,35 @@ function accessor(def) {
   };
 }
 
+// extra goes beside the label, outside the <label> element, so buttons in it don't act as the label's control.
 export function labelBlock(label, help, code, extra) {
-  return h('div', { class: 'lbl' }, h('label', {}, label, extra), help && h('small', {}, help), code && h('code', {}, code));
+  return h('div', { class: 'lbl' }, extra ? h('div', { class: 'lh' }, h('label', {}, label), extra) : h('label', {}, label),
+    help && h('small', {}, help), code && h('code', {}, code));
+}
+
+// Layer marks for a row, decided by app.js: in the total config, which layer sets this id; while editing a layer,
+// whether the layer owns it (with a button to drop it) or not (dimmed). Call paint() again after the value changes.
+export function ownMark(row, id) {
+  const el = h('span', { class: 'own' });
+  const paint = () => {
+    const o = S.hooks.owner?.(id) || {};
+    row.classList.toggle('dim', o.state === 'dim');
+    row.classList.toggle('owned', o.state === 'owned');
+    el.replaceChildren(...[
+      o.badge && h('span', { class: 'badge layer' + (o.warn ? ' warn' : ''), title: o.title }, o.badge),
+      o.remove && h('button', { class: 'iconbtn', title: 'Remove from this layer', onclick: o.remove }, '⊖'),
+    ].filter(Boolean));
+  };
+  paint();
+  return { el, paint };
 }
 
 export function field(def) {
   const acc = accessor(def);
   const cur = acc.read();
   const row = h('div', { class: 'row' });
-  const mark = () => { const v = acc.read(); row.classList.toggle('changed', v !== acc.read(true)); row.classList.toggle('missing', v === undefined); };
+  const om = ownMark(row, keyId(def.s, def.k));
+  const mark = () => { const v = acc.read(); row.classList.toggle('changed', v !== acc.read(true)); row.classList.toggle('missing', v === undefined); om.paint(); };
   const put = v => { acc.write(v); mark(); };
   const ctl = h('div', { class: 'ctl' });
   const isFloat = def.float ?? (def.type === 'range' && !def.int);
@@ -141,7 +162,7 @@ export function field(def) {
       break;
     }
   }
-  row.append(labelBlock(def.label || humanize(def.f || def.k), def.help, def.f ? `${def.k} › ${def.f}` : def.k), ctl);
+  row.append(labelBlock(def.label || humanize(def.f || def.k), def.help, def.f ? `${def.k} › ${def.f}` : def.k, om.el), ctl);
   mark();
   return row;
 }

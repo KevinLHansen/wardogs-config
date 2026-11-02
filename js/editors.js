@@ -1,7 +1,8 @@
 import { humanize, tagList, tagListStr } from './ini.js';
 import { SLOTS, parseBinds, bindStr, bindsStr, setKey, unboundSlots, withoutSlot } from './binds.js';
 import { S, SEC, docOf } from './state.js';
-import { h, toast, card, labelBlock, B, N, R, T, SEL, auto } from './ui.js';
+import { h, toast, card, labelBlock, ownMark, B, N, R, T, SEL, auto } from './ui.js';
+import { keyId, bindId } from './layers.js';
 
 const { U, SG, JOY, BINDS } = SEC;
 const gus = () => docOf('gus');
@@ -17,7 +18,8 @@ function resolutionRow() {
   const ny = h('input', { type: 'number', step: 1, min: 200, value: d.get(U, keys[1]) ?? '' });
   const presets = ['1280x720', '1600x900', '1920x1080', '2560x1080', '2560x1440', '3440x1440', '3840x1600', '3840x2160', '5120x1440'];
   const sel = h('select', {}, h('option', { value: '' }, 'Presets…'), presets.map(p => h('option', { value: p }, p.replace('x', ' × '))));
-  const mark = () => row.classList.toggle('changed', keys.slice(0, 2).some(k => d.get(U, k) !== d.origGet(U, k)));
+  const om = ownMark(row, keyId(U, keys[0]));
+  const mark = () => { row.classList.toggle('changed', keys.slice(0, 2).some(k => d.get(U, k) !== d.origGet(U, k))); om.paint(); };
   const apply = () => {
     if (!nx.value || !ny.value) return;
     const v = [nx.value, ny.value, nx.value, ny.value].map(x => String(parseInt(x, 10)));
@@ -26,7 +28,7 @@ function resolutionRow() {
   };
   nx.onchange = ny.onchange = apply;
   sel.onchange = () => { if (!sel.value) return; [nx.value, ny.value] = sel.value.split('x'); sel.value = ''; apply(); };
-  row.append(labelBlock('Resolution', 'Also updates the "last confirmed" resolution so the game keeps it', 'ResolutionSizeX / ResolutionSizeY'),
+  row.append(labelBlock('Resolution', 'Also updates the "last confirmed" resolution so the game keeps it', 'ResolutionSizeX / ResolutionSizeY', om.el),
     h('div', { class: 'ctl' }, nx, h('span', { class: 'unit' }, '×'), ny, sel));
   mark();
   return row;
@@ -102,9 +104,10 @@ function tagSegCard(title, key, prefix, opts) {
     const row = h('div', { class: 'row' });
     const seg = h('div', { class: 'seg' });
     const o = orig.find(x => x.tag === it.tag);
-    const paint = () => { [...seg.children].forEach(b => b.classList.toggle('on', b.dataset.v === items[i].v)); row.classList.toggle('changed', !o || o.v !== items[i].v); };
+    const om = ownMark(row, keyId(U, key));
+    const paint = () => { [...seg.children].forEach(b => b.classList.toggle('on', b.dataset.v === items[i].v)); row.classList.toggle('changed', !o || o.v !== items[i].v); om.paint(); };
     for (const v of [...new Set([...opts, it.v])]) seg.append(h('button', { type: 'button', 'data-v': v, onclick: () => { items[i].v = v; d.set(U, key, tagListStr(items)); paint(); } }, v));
-    row.append(labelBlock(prettyTag(it.tag, prefix)), h('div', { class: 'ctl' }, seg));
+    row.append(labelBlock(prettyTag(it.tag, prefix), null, null, om.el), h('div', { class: 'ctl' }, seg));
     paint();
     return row;
   });
@@ -260,10 +263,14 @@ function addOverride(tag) {
 }
 
 function unboundCard() {
-  const rows = binds.flatMap(b => unboundSlots(b).map(([slot, label]) => h('div', { class: 'row changed' },
-    labelBlock(`${humanize(groupOf(b.tag), true)} › ${actionLabel(b.tag)}`, `${label} key cleared by the game. ${defaultHint(b.tag) || ''}`.trim(), b.tag),
-    h('div', { class: 'ctl' }, keySlot(b, slot, label),
-      h('button', { class: 'btn small', title: 'Remove the empty slot from the file so the game uses its own default', onclick: () => { resetSlot(b, slot); rerender(); } }, 'Reset to default')))));
+  const rows = binds.flatMap(b => unboundSlots(b).map(([slot, label]) => {
+    const row = h('div', { class: 'row changed' });
+    const om = ownMark(row, bindId(b.tag));
+    row.append(labelBlock(`${humanize(groupOf(b.tag), true)} › ${actionLabel(b.tag)}`, `${label} key cleared by the game. ${defaultHint(b.tag) || ''}`.trim(), b.tag, om.el),
+      h('div', { class: 'ctl' }, keySlot(b, slot, label),
+        h('button', { class: 'btn small', title: 'Remove the empty slot from the file so the game uses its own default', onclick: () => { resetSlot(b, slot); rerender(); } }, 'Reset to default')));
+    return row;
+  }));
   return rows.length > 0 && card(`${rows.length} binding${rows.length === 1 ? '' : 's'} cleared by the game`, rows, { wide: true, cls: 'alert',
     note: 'These are saved with no key, usually because another binding took the key. Bind a key here, or reset to let the game use its default. Reset removes the empty entry; if another action still holds the default key, the game may clear it again.' });
 }
@@ -281,16 +288,22 @@ export function tabKeybinds() {
   const tagInput = h('input', { type: 'text', placeholder: 'Input.NamedActions.Player.Jump', list: 'known-tags', spellcheck: false, style: 'width:340px' });
   const overrideRow = b => {
     const ob = origBinds.find(o => o.tag === b.tag);
-    return h('div', { class: 'row' + (!ob || bindStr(b) !== ob.raw ? ' changed' : '') },
-      labelBlock(actionLabel(b.tag), defaultHint(b.tag), b.tag),
+    const row = h('div', { class: 'row' + (!ob || bindStr(b) !== ob.raw ? ' changed' : '') });
+    const om = ownMark(row, bindId(b.tag));
+    row.append(labelBlock(actionLabel(b.tag), defaultHint(b.tag), b.tag, om.el),
       h('div', { class: 'ctl' }, keySlot(b, 'PrimaryKey', 'Primary'), keySlot(b, 'SecondaryKey', 'Secondary'),
         h('button', { class: 'iconbtn', title: 'Remove this override (the game falls back to its default key)', onclick: () => { binds = binds.filter(x => x !== b); saveBinds(); rerender(); } }, '🗑')));
+    return row;
   };
-  const rememberedRow = tag => h('div', { class: 'row' },
-    labelBlock(actionLabel(tag), defaultHint(tag) || 'Default key not seen yet', tag),
-    h('div', { class: 'ctl' }, h('span', { class: 'muted' }, 'Game default'),
-      h('button', { class: 'btn small', onclick: () => addOverride(tag) }, 'Override'),
-      h('button', { class: 'iconbtn', title: 'Forget this action (remove it from the remembered list)', onclick: () => { delete S.known[tag]; S.hooks.saveKnown(); rerender(); } }, '✕')));
+  const rememberedRow = tag => {
+    const row = h('div', { class: 'row' });
+    const om = ownMark(row, bindId(tag));
+    row.append(labelBlock(actionLabel(tag), defaultHint(tag) || 'Default key not seen yet', tag, om.el),
+      h('div', { class: 'ctl' }, h('span', { class: 'muted' }, 'Game default'),
+        h('button', { class: 'btn small', onclick: () => addOverride(tag) }, 'Override'),
+        h('button', { class: 'iconbtn', title: 'Forget this action (remove it from the remembered list)', onclick: () => { delete S.known[tag]; S.hooks.saveKnown(); rerender(); } }, '✕')));
+    return row;
+  };
   const cards = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([g, list]) => card(humanize(g, true),
     list.sort((a, b) => (a.tag || a).localeCompare(b.tag || b)).map(x => typeof x === 'string' ? rememberedRow(x) : overrideRow(x))));
   const known = [...new Set([...origBinds.map(b => b.tag), ...binds.map(b => b.tag), ...Object.keys(S.known)])];

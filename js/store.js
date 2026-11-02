@@ -1,4 +1,4 @@
-// IndexedDB storage (snapshots, remembered keybind actions) and file encoding.
+// IndexedDB storage (layers, backups, remembered keybind actions) and file encoding.
 
 const DB_NAME = 'wardogs-config-editor';
 let dbPromise;
@@ -8,7 +8,8 @@ function openDb() {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
-      if (!db.objectStoreNames.contains('layers')) db.createObjectStore('layers', { keyPath: 'id' }); // unused; kept so the schema stays the same
+      // Both unused now (layers live in kv; snapshots are read once to become backups); kept so the schema stays the same.
+      if (!db.objectStoreNames.contains('layers')) db.createObjectStore('layers', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('snapshots')) db.createObjectStore('snapshots', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);

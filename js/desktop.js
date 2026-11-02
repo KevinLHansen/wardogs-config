@@ -22,7 +22,7 @@ export async function defaultPath() {
   return argValue('config') || (await N.os.getEnv('LOCALAPPDATA')) + '\\Wardogs\\Saved\\Config\\WindowsClient\\GameUserSettings.ini';
 }
 
-/* Snapshots and remembered keybind actions live in a JSON file. The web view's own storage is tied to the
+/* Layers, backups and remembered keybind actions live in a JSON file. The web view's own storage is tied to the
    local server's port, which changes on every launch. --data=<path> overrides the file (for testing). */
 let dataFile = null;
 async function dataPath() {

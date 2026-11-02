@@ -14,14 +14,20 @@ const blankFile = key => ({ key, name: FILES[key], doc: new IniDoc(''), exists: 
 export const S = {
   loaded: false,        // GameUserSettings.ini has been loaded
   files: { gus: blankFile('gus') },
-  snapshots: [],        // { id, name, auto, created, files: { gus } }
+  layers: [],           // working copy, priority order (first wins): { id, name, active, entries: { id: value } } (see layers.js)
+  saved: { layers: [], applied: [] }, // as last saved; applied: ids the layers set in the file at that save
+  plan: new Map(),      // what the layers currently do to the file doc (see layers.js plan())
+  edit: null,           // id of the layer being edited, or null for the total config
+  view: null,           // while editing a layer: the doc the tabs work on
+  drift: [],            // ids the layers own that differed in the file when it was loaded (usually the game changed them)
+  backups: [],          // { created, text }, newest first
   known: {},            // keybind actions seen in loaded files: { tag: { firstSeen, lastSeen, defaults: { PrimaryKey?, SecondaryKey? } } }
-  tab: 'snapshots',
+  tab: 'file',
   path: null,           // desktop app: full path of the file being edited
   stale: false,         // desktop app: the file changed on disk while there are unsaved edits
-  busy: false,          // desktop app: a save or restore is writing the file
+  busy: false,          // desktop app: a save or undo is writing the file
   hooks: {},            // render callbacks set by app.js
 };
 
-export const docOf = file => S.files[file].doc;
-export const anyDirty = () => S.loaded && Object.values(S.files).some(f => f.doc.dirty());
+// The doc the editors work on: the layer view while a layer is being edited.
+export const docOf = file => (S.view && file === 'gus' ? S.view : S.files[file].doc);
