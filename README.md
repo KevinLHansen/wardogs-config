@@ -1,7 +1,7 @@
 # Wardogs Config Editor
 
 > [!WARNING]
-> **Disclaimer:** this whole project was fully and entirely slopped using Claude Opus 5.5. Every line of code, test and doc in this repo was written by AI. Use it at your own risk, and keep a backup of your config.
+> **Disclaimer:** this whole project was fully and entirely slopped up using Claude Opus 5.5. Every line of code, test and doc in this repo was written by AI.
 
 An editor for Wardogs' `GameUserSettings.ini`, in two forms built from the same page:
 
