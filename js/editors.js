@@ -270,32 +270,72 @@ function keySlot(b, slot, label) {
     k && h('button', { class: 'iconbtn', title: 'Unbind', onclick: () => { setBindKey(b, slot, ''); rerender(); } }, '✕')));
 }
 
+// A slot the game saved as custom but with no key: the game unbound it, and its menu may not let you rebind it.
+const SLOTS = [['PrimaryKey', 'Primary'], ['SecondaryKey', 'Secondary']];
+const unboundSlots = b => SLOTS.filter(([s]) => b.slots[s]?.bIsCustom === 'True' && !b.slots[s].Key);
+// Drop one slot from the override; with no custom slot left, drop the whole entry so the game uses its defaults.
+function resetSlot(b, slot) {
+  delete b.slots[slot];
+  b.dirty = true;
+  if (!Object.values(b.slots).some(s => s.bIsCustom === 'True')) binds = binds.filter(x => x !== b);
+  saveBinds();
+}
+const defaultHint = tag => {
+  const def = S.known[tag]?.defaults || {};
+  const parts = SLOTS.filter(([s]) => def[s]).map(([s, l]) => `${l.toLowerCase()} ${def[s]}`);
+  return parts.length ? `Game default seen: ${parts.join(', ')}` : null;
+};
+const groupOf = tag => tag.replace(/^Input\.NamedActions\./, '').split('.')[0];
+const actionLabel = tag => prettyTag(tag, 'Input.NamedActions.' + groupOf(tag) + '.') || groupOf(tag);
+
+function addOverride(tag) {
+  if (binds.some(b => b.tag === tag)) { toast('That action already has an override.', 'err'); return; }
+  binds.push({ tag, slots: { PrimaryKey: { bIsCustom: 'True' } }, dirty: true, raw: '' });
+  saveBinds(); rerender();
+}
+
+function unboundCard() {
+  const rows = binds.flatMap(b => unboundSlots(b).map(([slot, label]) => h('div', { class: 'row changed' },
+    labelBlock(`${humanize(groupOf(b.tag), true)} › ${actionLabel(b.tag)}`, `${label} key cleared by the game. ${defaultHint(b.tag) || ''}`.trim(), b.tag),
+    h('div', { class: 'ctl' }, keySlot(b, slot, label),
+      h('button', { class: 'btn small', title: 'Remove the empty slot from the file so the game uses its own default', onclick: () => { resetSlot(b, slot); rerender(); } }, 'Reset to default')))));
+  return rows.length > 0 && card(`${rows.length} binding${rows.length === 1 ? '' : 's'} cleared by the game`, rows, { wide: true, cls: 'alert',
+    note: 'These are saved with no key, usually because another binding took the key. Bind a key here, or reset to let the game use its default. Reset removes the empty entry; if another action still holds the default key, the game may clear it again.' });
+}
+
 export function tabKeybinds() {
   const d = gus();
   binds = parseBinds(d.get(BINDS, 'CustomKeybindings'));
   const origBinds = parseBinds(d.origGet(BINDS, 'CustomKeybindings'));
+  const inFile = new Set(binds.map(b => b.tag));
+  // Actions remembered from earlier loads that the file doesn't override now: the game uses its default for them.
+  const remembered = Object.keys(S.known).filter(t => !inFile.has(t));
   const groups = {};
-  binds.forEach(b => { const t = b.tag.replace(/^Input\.NamedActions\./, ''); (groups[t.split('.')[0]] ||= []).push(b); });
-  const known = [...new Set([...origBinds, ...binds].map(b => b.tag))];
+  binds.forEach(b => (groups[groupOf(b.tag)] ||= []).push(b));
+  remembered.forEach(t => (groups[groupOf(t)] ||= []).push(t));
   const tagInput = h('input', { type: 'text', placeholder: 'Input.NamedActions.Player.Jump', list: 'known-tags', spellcheck: false, style: 'width:340px' });
-  const add = () => {
-    const tag = tagInput.value.trim();
-    if (!tag) return;
-    if (binds.some(b => b.tag === tag)) { toast('That action already has an override below.', 'err'); return; }
-    binds.push({ tag, slots: { PrimaryKey: { bIsCustom: 'True' } }, dirty: true, raw: '' });
-    saveBinds(); rerender();
-  };
-  const cards = Object.entries(groups).map(([g, list]) => card(humanize(g, true), list.map(b => {
+  const overrideRow = b => {
     const ob = origBinds.find(o => o.tag === b.tag);
     return h('div', { class: 'row' + (!ob || bindStr(b) !== ob.raw ? ' changed' : '') },
-      labelBlock(prettyTag(b.tag, 'Input.NamedActions.' + g + '.') || g, null, b.tag),
+      labelBlock(actionLabel(b.tag), defaultHint(b.tag), b.tag),
       h('div', { class: 'ctl' }, keySlot(b, 'PrimaryKey', 'Primary'), keySlot(b, 'SecondaryKey', 'Secondary'),
         h('button', { class: 'iconbtn', title: 'Remove this override (the game falls back to its default key)', onclick: () => { binds = binds.filter(x => x !== b); saveBinds(); rerender(); } }, '🗑')));
-  })));
+  };
+  const rememberedRow = tag => h('div', { class: 'row' },
+    labelBlock(actionLabel(tag), defaultHint(tag) || 'Default key not seen yet', tag),
+    h('div', { class: 'ctl' }, h('span', { class: 'muted' }, 'Game default'),
+      h('button', { class: 'btn small', onclick: () => addOverride(tag) }, 'Override'),
+      h('button', { class: 'iconbtn', title: 'Forget this action (remove it from the remembered list)', onclick: () => { delete S.known[tag]; S.hooks.saveKnown(); rerender(); } }, '✕')));
+  const cards = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([g, list]) => card(humanize(g, true),
+    list.sort((a, b) => (a.tag || a).localeCompare(b.tag || b)).map(x => typeof x === 'string' ? rememberedRow(x) : overrideRow(x))));
+  const known = [...new Set([...origBinds.map(b => b.tag), ...binds.map(b => b.tag), ...Object.keys(S.known)])];
   return h('div', { class: 'grid' },
+    unboundCard(),
     card('Custom keybindings', [
       h('div', { class: 'row' }, labelBlock('Add an override', 'Action tags come from the game (Input.NamedActions.…). Rebind once in-game to discover a tag.', null, layerBadge('gus', BINDS, 'CustomKeybindings')),
-        h('div', { class: 'ctl' }, tagInput, h('datalist', { id: 'known-tags' }, known.map(t => h('option', { value: t }))), h('button', { class: 'btn', onclick: add }, 'Add'))),
-    ], { wide: true, note: 'The file only stores bindings you changed from the defaults, so only those appear here. Click a key to rebind it, ✎ to type a key name, ✕ to unbind, 🗑 to go back to the game default.' }),
+        h('div', { class: 'ctl' }, tagInput, h('datalist', { id: 'known-tags' }, known.map(t => h('option', { value: t }))), h('button', { class: 'btn', onclick: () => { const t = tagInput.value.trim(); if (t) addOverride(t); } }, 'Add'))),
+    ], { wide: true, note: [
+      h('p', {}, 'The game only writes actions you have changed. This page remembers every action it has seen in a loaded file (in this browser), so those stay listed after the game drops them. Default keys are learned when the file shows one.'),
+      h('p', {}, 'Click a key to rebind it, ✎ to type a key name, ✕ to unbind, 🗑 to go back to the game default.')] }),
     ...cards);
 }

@@ -1,4 +1,4 @@
-// IndexedDB storage (layers, snapshots, settings, folder handle) and file access.
+// IndexedDB storage (layers, snapshots, settings) and file encoding.
 
 const DB_NAME = 'wardogs-config-editor';
 let dbPromise;
@@ -34,41 +34,25 @@ export const db = {
 };
 
 /* ---------- files ---------- */
-export const FILES = { gus: 'GameUserSettings.ini', engine: 'Engine.ini' };
+export const FILES = { gus: 'GameUserSettings.ini' };
 
-// Accept the WindowsClient folder itself or any parent up to the Wardogs folder.
-export async function findConfigDir(handle) {
-  const paths = [[], ['WindowsClient'], ['Config', 'WindowsClient'], ['Saved', 'Config', 'WindowsClient'], ['Wardogs', 'Saved', 'Config', 'WindowsClient']];
-  for (const path of paths) {
-    try {
-      let d = handle;
-      for (const p of path) d = await d.getDirectoryHandle(p);
-      await d.getFileHandle(FILES.gus);
-      return d;
-    } catch { /* try next */ }
-  }
+// Which config file a picked or dropped file is, by name; null if none.
+export function fileKey(name) {
+  if (/^gameusersettings\b.*\.ini$/i.test(name)) return 'gus';
   return null;
 }
 
-export async function readFile(dir, name) {
-  let fh;
-  try { fh = await dir.getFileHandle(name); }
-  catch (e) { if (e.name === 'NotFoundError') return { exists: false, text: '', enc: 'utf8', lastModified: null }; throw e; }
-  const f = await fh.getFile();
-  const buf = new Uint8Array(await f.arrayBuffer());
+// Read a File (from a picker or drop), detecting the encoding so it can be written back the same way.
+export async function readFile(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
   let enc = 'utf8', off = 0;
   if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) { enc = 'utf8bom'; off = 3; }
   else if (buf[0] === 0xFF && buf[1] === 0xFE) { enc = 'utf16le'; off = 2; }
   const text = new TextDecoder(enc === 'utf16le' ? 'utf-16le' : 'utf-8').decode(buf.subarray(off));
-  return { exists: true, text, enc, lastModified: f.lastModified };
+  return { text, enc, lastModified: file.lastModified };
 }
 
-export async function fileStamp(dir, name) {
-  try { return (await (await dir.getFileHandle(name)).getFile()).lastModified; }
-  catch (e) { if (e.name === 'NotFoundError') return null; throw e; }
-}
-
-function encode(text, enc) {
+export function encode(text, enc) {
   if (enc === 'utf16le') {
     const out = new Uint8Array(2 + text.length * 2);
     out[0] = 0xFF; out[1] = 0xFE;
@@ -80,12 +64,4 @@ function encode(text, enc) {
   const out = new Uint8Array(bytes.length + 3);
   out.set([0xEF, 0xBB, 0xBF]); out.set(bytes, 3);
   return out;
-}
-
-export async function writeFile(dir, name, text, enc) {
-  const fh = await dir.getFileHandle(name, { create: true });
-  const w = await fh.createWritable();
-  try { await w.write(encode(text, enc)); await w.close(); }
-  catch (e) { try { await w.abort(); } catch { } throw e; }
-  return (await fh.getFile()).lastModified;
 }

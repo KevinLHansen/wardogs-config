@@ -160,8 +160,9 @@ export function card(title, items, opts = {}) {
   return c;
 }
 
-export function download(name, text, type = 'application/json') {
-  const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+// data: a string or bytes.
+export function download(name, data, type = 'application/json') {
+  const a = h('a', { href: URL.createObjectURL(new Blob([data], { type })), download: name });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
