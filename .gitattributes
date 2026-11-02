@@ -1,0 +1,2 @@
+# Test fixtures are stored byte for byte (the real file uses CRLF).
+test/fixtures/** -text
