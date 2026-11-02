@@ -5,10 +5,10 @@
 
 An editor for Wardogs' `GameUserSettings.ini`, in two forms built from the same page:
 
-- **Desktop app (Windows)**: reads and writes the file in place. Download the zip from [Releases](https://github.com/KevinLHansen/wardogs-config/releases/latest), unzip it anywhere and run `wardogs-config.exe`.
-- **Website**: [kevinlhansen.github.io/wardogs-config](https://kevinlhansen.github.io/wardogs-config/). Browsers can't write into `AppData`, so you load the file and save by downloading it.
+- **Desktop app (Windows), recommended**: reads and writes the file in place, notices when the game rewrites it, and asks before overwriting changes. Download the zip from [Releases](https://github.com/KevinLHansen/wardogs-config/releases/latest), unzip it anywhere and run `wardogs-config.exe`.
+- **Website, as an alternative**: [kevinlhansen.github.io/wardogs-config](https://kevinlhansen.github.io/wardogs-config/). Nothing to download, but browsers can't write into `AppData`, so you load the file and save by downloading it and copying it back yourself.
 
-## Desktop app
+## Desktop app (recommended)
 - Opens `%LOCALAPPDATA%\Wardogs\Saved\Config\WindowsClient\GameUserSettings.ini` automatically (or **Choose file…** if it isn't there).
 - **Save** (Ctrl+S) writes the file directly, after an automatic snapshot of the version on disk.
 - Watches the file: when the game rewrites it, the page reloads if you have no unsaved edits, or shows a warning if you do.
@@ -17,7 +17,9 @@ An editor for Wardogs' `GameUserSettings.ini`, in two forms built from the same 
 - The app is unsigned, so Windows SmartScreen may warn the first time you run it ("More info" → "Run anyway").
 - Save with the game closed: it rewrites `GameUserSettings.ini` when it exits.
 
-## Website
+## Website (alternative)
+Use this if you'd rather not run an unsigned app, or aren't on Windows.
+
 1. Click **Load file**, paste `%LOCALAPPDATA%\Wardogs\Saved\Config\WindowsClient` into the dialog's address bar and select `GameUserSettings.ini`. You can also drag the file onto the page.
 2. Edit settings, then press **Download** (Ctrl+S). The file downloads in its original encoding.
 3. Move the download into the config folder and replace the old file, with the game closed.
